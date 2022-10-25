@@ -1,1 +1,1 @@
-# Reward-Trees
+# Reward Trees
