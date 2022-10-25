@@ -1,5 +1,6 @@
 from . import RewardLearner
 import torch
+from numpy import array, unravel_index
 from matplotlib.pyplot import subplots
 
 
@@ -24,21 +25,25 @@ class RewardTree(RewardLearner):
         """
         Given tensors of transitions, recursively propagate through the tree to get leaf visits.
         """
-        assert states.dim() == next_states.dim() == 2, "Currently only works with 2D"
         shape, num_leaves = states.shape, len(self.leaves)
+        flatten_to = states.dim() - self.states.dim()
         if one_hot:
-            visits = torch.full((*shape[:-1], num_leaves), -1, device=self.device)
+            visits = torch.full((*shape[:flatten_to+1], num_leaves), -1, device=self.device)
             oh = torch.eye(num_leaves, dtype=int, device=self.device)
-        else: visits = torch.full(shape[:-1], -1, device=self.device)
+        else: visits = torch.full(shape[:flatten_to+1], -1, device=self.device)
+        s_flat  = states .flatten(0, flatten_to)
+        a_flat  = actions.flatten(0, flatten_to)
+        ns_flat = states .flatten(0, flatten_to)
         def propagate(node, ind):
             if len(ind) == 0: return
             if node in self.leaves: # At a leaf, store the leaf num for all remaining indices
+                ind_unflat = [torch.tensor(i, device=self.device) for i in unravel_index(ind, shape[:flatten_to+1])]
                 x = self.leaves.index(node)
-                visits[ind] = oh[x] if one_hot else x
+                visits[ind_unflat] = oh[x] if one_hot else x
             else: # At an internal node, split the indices based on the split threshold
-                left_mask = node(states[ind], actions[ind], next_states[ind])
+                left_mask = node(s_flat[ind], a_flat[ind], ns_flat[ind])
                 propagate(node.left, ind[left_mask]); propagate(node.right, ind[~left_mask])
-        propagate(self.root, torch.arange(shape[0], device=self.device))
+        propagate(self.root, torch.arange(s_flat.shape[0], device=self.device))
         return visits
 
     def train(self, max_num_leaves:int=2, loss_func:str="0-1", num_batches:int=500, batch_size:int=32):
