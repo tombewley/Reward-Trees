@@ -82,9 +82,10 @@ class RewardLearner:
         """
         Normalise rewards to have unit standard deviation on the training set, with a common sign (+/-).
         """
-        rewards = self.indices_to_rewards()
-        self.shift = rewards.max() if self.negative_rewards else rewards.min()
-        self.scale = rewards.std()
+        with torch.no_grad():
+            rewards = self.indices_to_rewards()
+            self.shift = rewards.max() if self.negative_rewards else rewards.min()
+            self.scale = rewards.std()
 
     def get_indices(self, i:Union[torch.Tensor, int, callable]) -> torch.Tensor:
         """
