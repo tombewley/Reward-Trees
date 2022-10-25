@@ -4,6 +4,8 @@ from collections import namedtuple
 from random import choices
 
 
+preference_tuple = namedtuple("preference_tuple", ("i", "j", "y", "w", "info"))
+
 class RewardLearner:
     """
     Base class for a preference-based reward learner.
@@ -11,7 +13,6 @@ class RewardLearner:
     sigmoid = torch.nn.Sigmoid()
     bce_loss = torch.nn.BCELoss()
     bce_loss_noreduce = torch.nn.BCELoss(reduction="none")
-    preference_tuple = namedtuple("preference", ("i", "j", "y", "w", "info"))
 
     def __init__(self, model, embed_by_ep=False, negative_rewards=False):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -55,7 +56,7 @@ class RewardLearner:
         assert (type(i) in {torch.Tensor, int} or callable(i)) and (type(j) in {torch.Tensor, int} or callable(j)), f"Invalid type for i or j"
         assert type(preference) == float and 0. <= preference <= 1., f"Invalid preference value: {preference}"
         assert type(weight) == float and 0. < weight, f"Invalid weight value: {weight}"
-        self.preferences.append(self.preference_tuple(i, j, preference, weight, info))
+        self.preferences.append(preference_tuple(i, j, preference, weight, info))
 
     def update_on_batch(self, batch_size:int):
         """
