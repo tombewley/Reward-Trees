@@ -45,6 +45,7 @@ class RewardLearner:
             self.states      = torch.cat((self.states, states))
             self.actions     = torch.cat((self.actions, actions))
             self.next_states = torch.cat((self.next_states, next_states))
+            self.ep_nums     = torch.cat((self.ep_nums, ep_nums))
 
     def add_preference(self, i:Union[torch.Tensor, int, callable], j:Union[torch.Tensor, int, callable], preference:float, weight:float=1., **info):
         """
