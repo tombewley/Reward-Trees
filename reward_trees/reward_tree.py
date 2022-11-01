@@ -37,7 +37,7 @@ class RewardTree(RewardLearner):
         def propagate(node, ind):
             if len(ind) == 0: return
             if node in self.leaves: # At a leaf, store the leaf num for all remaining indices
-                ind_unflat = [torch.tensor(i, device=self.device) for i in unravel_index(ind, shape[:flatten_to+1])]
+                ind_unflat = [torch.tensor(i, device=self.device) for i in unravel_index(ind.cpu().numpy(), shape[:flatten_to+1])]
                 x = self.leaves.index(node)
                 visits[ind_unflat] = oh[x] if one_hot else x
             else: # At an internal node, split the indices based on the split threshold
