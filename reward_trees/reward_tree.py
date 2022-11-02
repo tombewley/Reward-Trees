@@ -31,9 +31,9 @@ class RewardTree(RewardLearner):
             visits = torch.full((*shape[:flatten_to+1], num_leaves), -1, device=self.device)
             oh = torch.eye(num_leaves, dtype=int, device=self.device)
         else: visits = torch.full(shape[:flatten_to+1], -1, device=self.device)
-        s_flat  = states .flatten(0, flatten_to)
-        a_flat  = actions.flatten(0, flatten_to)
-        ns_flat = states .flatten(0, flatten_to)
+        s_flat  = states     .flatten(0, flatten_to)
+        a_flat  = actions    .flatten(0, flatten_to)
+        ns_flat = next_states.flatten(0, flatten_to)
         def propagate(node, ind):
             if len(ind) == 0: return
             if node in self.leaves: # At a leaf, store the leaf num for all remaining indices
