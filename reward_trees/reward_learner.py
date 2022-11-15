@@ -15,7 +15,7 @@ class RewardLearner:
     bce_loss_noreduce = torch.nn.BCELoss(reduction="none")
 
     def __init__(self, model, embed_by_ep=False, negative_rewards=False):
-        self.device = torch.device("cuda" if torch.cuda.is_available() else ("mps" if torch.has_mps else "cpu"))
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = model.to(self.device)
         self.embed_by_ep = embed_by_ep
         self.negative_rewards = negative_rewards
