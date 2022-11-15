@@ -5,26 +5,23 @@ from matplotlib.pyplot import subplots
 
 
 class RewardTree(RewardLearner):
-    """
-    Preference-based reward learner with a tree model.
-    """
-    def __init__(self, features_and_thresholds:dict, max_num_eps:int, max_ep_length:int=None, embed_by_ep:bool=True):
+    """Preference-based reward learner with a tree model."""
+    def __init__(self, features_and_thresholds:dict, max_num_eps:int, max_ep_length:int=None, embed_by_ep:bool=True, seed:int=None):
+        if seed is not None: torch.manual_seed(seed) # Need to do this here for seeded model initialisation
         # Here self.model learns individual predictions for transitions in the dataset
         # These are used as inputs to the tree growth process
         RewardLearner.__init__(self,
             model=EmbeddingModel(
                 num_embeddings=max_num_eps*(1 if embed_by_ep else max_ep_length),
                 lr=1e-1),
-            embed_by_ep=embed_by_ep)
+            embed_by_ep=embed_by_ep, seed=seed)
         self.features_and_thresholds = {f: t.to(self.device) for f, t in features_and_thresholds.items()}
-    
+
     def __call__(self, states:torch.Tensor, actions:torch.Tensor, next_states:torch.Tensor) -> torch.Tensor:
         return self.transitions_to_visits(states, actions, next_states).float() @ self.r_mean
 
     def transitions_to_visits(self, states:torch.Tensor, actions:torch.Tensor, next_states:torch.Tensor, one_hot:bool=True) -> torch.Tensor:
-        """
-        Given tensors of transitions, recursively propagate through the tree to get leaf visits.
-        """
+        """Given tensors of transitions, recursively propagate through the tree to get leaf visits."""
         shape, num_leaves = states.shape, len(self.leaves)
         flatten_to = states.dim() - self.states.dim()
         if one_hot:
@@ -46,10 +43,8 @@ class RewardTree(RewardLearner):
         propagate(self.root, torch.arange(s_flat.shape[0], device=self.device))
         return visits
 
-    def train(self, max_num_leaves:int=2, loss_func:str="0-1", num_batches:int=500, batch_size:int=32):
-        """
-        Complete model induction process from paper "Reward Learning with Trees: Methods and Evaluation".
-        """
+    def train(self, max_num_leaves:int=2, loss_func:str="0-1", num_batches:int=500, batch_size:int=32, plot:bool=False):
+        """Complete model induction process from paper "Reward Learning with Trees: Methods and Evaluation"."""
         assert loss_func in {"0-1", "bce"}
         # Estimate rewards for transitions in the dataset by gradient descent on BCE loss
         for i in range(num_batches): print(i, self.update_on_batch(batch_size).item())
@@ -71,7 +66,7 @@ class RewardTree(RewardLearner):
             current_loss_bce = (self.bce_loss_noreduce(0.5 * torch.ones_like(y), y) * w).mean()
             # Growth stage
             while len(self.leaves) < max_num_leaves:
-                # _, ax = subplots(1, len(self.leaves), squeeze=False); ax = ax.flatten()
+                if plot: _, ax = subplots(1, len(self.leaves), squeeze=False); ax = ax.flatten()
                 candidates = []
                 # Iterate through each leaf in the current tree
                 for l, leaf in enumerate(self.leaves):
@@ -114,7 +109,7 @@ class RewardTree(RewardLearner):
                         best_split = loss_reduction.argmax()
                         if loss_reduction[best_split] > 0: # Only keep split if loss is reduced
                             candidates.append((loss_0_1[best_split], loss_bce[best_split], l, f, best_split))
-                        # ax[l].plot(leaf.features_and_thresholds[f], loss_reduction)
+                        if plot: ax[l].plot(leaf.features_and_thresholds[f], loss_reduction)
                 if len(candidates) == 0: break # If loss reduction not possible, stop growth
                 # Identify and make the best split across all leaves and features
                 current_loss_0_1, current_loss_bce, l, f, best_split = sorted(candidates, key=lambda c: c[0 if loss_func == "0-1" else 1])[0]
@@ -130,8 +125,7 @@ class RewardTree(RewardLearner):
             #####################
 
     def to_hyperrectangles(self):
-        """
-        Convert tree into a form that enables visual and textual representation.
+        """Convert tree into a form that enables visual and textual representation.
         Requires https://github.com/tombewley/hyperrectangles.
         """
         from hyperrectangles import Space, Node as hr_Node, Tree
@@ -154,16 +148,14 @@ class EmbeddingModel(torch.nn.Embedding):
     def forward(self, i: torch.Tensor) -> torch.Tensor:
         return super().forward(i).squeeze()
 
-    def optimise(self, loss): 
+    def optimise(self, loss):
         self.optimiser.zero_grad()
         loss.backward()
         self.optimiser.step()
 
 
 class Node:
-    """
-    Class for a node in the tree.
-    """
+    """Class for a node in the tree."""
     def __init__(self, ind, features_and_thresholds):
         # On creation
         self.ind, self.features_and_thresholds = ind, features_and_thresholds

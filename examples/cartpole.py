@@ -4,10 +4,10 @@ Example script for reward tree learning in CartPole.
 
 from reward_trees import RewardTree, RewardNet
 from argparse import ArgumentParser
-import gym
+import gymnasium as gym
 import torch
 from numpy import array, pi
-from random import randint
+from random import Random
 import matplotlib.pyplot as plt
 
 
@@ -16,6 +16,7 @@ parser.add_argument("--num_eps",         type=int, default=500 )
 parser.add_argument("--ep_length",       type=int, default=5   )
 parser.add_argument("--num_preferences", type=int, default=1500)
 parser.add_argument("--num_leaves",      type=int, default=5   )
+parser.add_argument("--seed",            type=int, default=0   )
 args = parser.parse_args()
 
 # Define features; here we're just using the raw environment state dimensions
@@ -37,7 +38,7 @@ def not_terminated(s, a, ns): return ~terminated(s, a, ns)
 def oracle(s, a, ns): return (not_terminated(s, a, ns)).sum()
 
 # Load up CartPole, then add bounds to the state space (infinite by default)
-cartpole = gym.make("CartPole-v0")
+cartpole = gym.make("CartPole-v1")
 cartpole.observation_space.low [1] = -2
 cartpole.observation_space.low [3] = -3
 cartpole.observation_space.high[1] = +2
@@ -52,11 +53,16 @@ tree = RewardTree(
         theta     : torch.arange(lo[2], hi[2], 0.005),
         theta_dot : torch.arange(lo[3], hi[3], 0.05 )
     },
-    max_num_eps=args.num_eps
+    max_num_eps=args.num_eps, seed=args.seed
 )
 
 # Also initialise a neural network model for comparison
-net = RewardNet(features=(x, x_dot, theta, theta_dot))
+net = RewardNet(features=(x, x_dot, theta, theta_dot), seed=args.seed)
+
+# Seed the environment and random number generator for pair sampling
+cartpole.observation_space.seed(args.seed)
+cartpole.action_space.seed(args.seed)
+rng = Random(args.seed)
 
 # Generate bunch of 'pseudo-episodes' by randomly sampling from the bounded state space
 n = args.num_eps * args.ep_length
@@ -69,11 +75,11 @@ tree.add_transitions(states[:-1], actions, states[1:], ep_nums)
 net .add_transitions(states[:-1], actions, states[1:], ep_nums)
 
 # Generate a bunch of preferences over randomly sampled pairs of pseudo-episodes
-# Preferences are deterministic; the one with higher oracle return is always preferred 
+# Preferences are deterministic; the one with higher oracle return is always preferred
 tried_already = set()
 while len(tree.preferences) < args.num_preferences:
-    i = randint(0, args.num_eps-1)
-    j = randint(0, i)
+    i = rng.randint(0, args.num_eps-1)
+    j = rng.randint(0, i)
     if (i, j) not in tried_already:
         ind_i = tree.get_indices(i)
         ind_j = tree.get_indices(j)
@@ -96,6 +102,7 @@ s, a, ns = tree.states, tree.actions, tree.next_states
 tree_rewards = tree(s, a, ns).detach().numpy()
 net_rewards  = net (s, a, ns).detach().numpy()
 
+fig, ax = plt.subplots(1, 2)
 if False:
     # Requires https://github.com/tombewley/hyperrectangles
     from hyperrectangles import show_rectangles
@@ -110,7 +117,6 @@ if False:
     )
 
 # Scatter plot reward predictions
-fig, ax = plt.subplots(1, 2)
 ax[0].scatter(ns[:,0], ns[:,2], c=tree_rewards, s=3, cmap="coolwarm_r")
 ax[1].scatter(ns[:,0], ns[:,2], c=net_rewards,  s=3, cmap="coolwarm_r")
 ax[0].set_xlabel("x"); ax[0].set_ylabel("theta")

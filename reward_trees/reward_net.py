@@ -3,11 +3,10 @@ import torch
 
 
 class RewardNet(RewardLearner):
-    """
-    Preference-based reward learner with a neural network model.
-    """
-    def __init__(self, features):
-        RewardLearner.__init__(self, model=NetModel(features=features))
+    """Preference-based reward learner with a neural network model."""
+    def __init__(self, features, seed:int=None):
+        if seed is not None: torch.manual_seed(seed) # Need to do this here for seeded model initialisation
+        RewardLearner.__init__(self, model=NetModel(features=features), seed=seed)
 
     def train(self, num_batches=500, batch_size=32):
         for i in range(num_batches): print(i, self.update_on_batch(batch_size).item())
