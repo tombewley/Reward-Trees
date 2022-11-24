@@ -16,6 +16,7 @@ class RewardTree(RewardLearner):
                 lr=1e-1),
             embed_by_ep=embed_by_ep, seed=seed)
         self.features_and_thresholds = {f: t.to(self.device) for f, t in features_and_thresholds.items()}
+        self.reset()
 
     def __call__(self, states:torch.Tensor, actions:torch.Tensor, next_states:torch.Tensor) -> torch.Tensor:
         return self.transitions_to_visits(states, actions, next_states).float() @ self.r_mean
@@ -43,6 +44,12 @@ class RewardTree(RewardLearner):
         propagate(self.root, torch.arange(s_flat.shape[0], device=self.device))
         return visits
 
+    def reset(self, ind=None):
+        """Initialise a blank tree and optionally populate with indices."""
+        self.root = Node(ind, self.features_and_thresholds)
+        self.leaves = [self.root]
+        self.r_mean = torch.zeros(1, device=self.device)
+
     def train(self, max_num_leaves:int=2, loss_func:str="0-1", num_batches:int=500, batch_size:int=32, plot:bool=False):
         """Complete model induction process from paper "Reward Learning with Trees: Methods and Evaluation"."""
         assert loss_func in {"0-1", "bce"}
@@ -58,10 +65,8 @@ class RewardTree(RewardLearner):
             y_sign = (y - 0.5).sign()
             w      = torch.tensor([p.w for p in self.preferences], device=self.device)
             # Initialise a blank tree
-            self.root = Node(ind, self.features_and_thresholds)
-            self.leaves = [self.root]
-            self.visits = torch.ones((1, self.states.shape[0]), dtype=bool, device=self.device)
-            self.r_mean = torch.zeros(1, device=self.device)
+            self.reset(ind)
+            all_visits = torch.ones((1, self.states.shape[0]), dtype=bool, device=self.device)
             current_loss_0_1 = 1.
             current_loss_bce = (self.bce_loss_noreduce(0.5 * torch.ones_like(y), y) * w).mean()
             # Growth stage
@@ -71,8 +76,8 @@ class RewardTree(RewardLearner):
                 # Iterate through each leaf in the current tree
                 for l, leaf in enumerate(self.leaves):
                     # Gather visits and mean rewards from all other leaves
-                    visits_other = torch.cat([self.visits[:l], torch.zeros((2, self.states.shape[0]), dtype=bool, device=self.device),
-                                              self.visits[l+1:]]).unsqueeze(0)
+                    visits_other = torch.cat([all_visits[:l], torch.zeros((2, self.states.shape[0]), dtype=bool, device=self.device),
+                                              all_visits[l+1:]]).unsqueeze(0)
                     r_mean_other = torch.cat([self.r_mean[:l], torch.zeros(2, device=self.device), self.r_mean[l+1:]]).unsqueeze(0)
                     # Iterate through each splitting feature
                     for f in leaf.features_and_thresholds:
@@ -118,8 +123,8 @@ class RewardTree(RewardLearner):
                 print(f"{len(self.leaves)}: Split leaf {l} at {f.__name__}={node.threshold} (loss_0_1={current_loss_0_1}, loss_bce={current_loss_bce})")
                 # Update attributes for use in future growth
                 self.leaves = self.leaves[:l] + [node.left, node.right] + self.leaves[l+1:]
-                self.visits = torch.cat([self.visits[:l], node.visits[f][best_split], self.visits[l+1:]])
                 self.r_mean = torch.cat([self.r_mean[:l], node.r_mean[f][best_split], self.r_mean[l+1:]])
+                all_visits = torch.cat([all_visits[:l], node.visits[f][best_split], all_visits[l+1:]])
             #####################
             # TODO: pruning stage
             #####################
