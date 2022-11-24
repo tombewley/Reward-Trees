@@ -12,9 +12,10 @@ class RewardLearner:
     bce_loss = torch.nn.BCELoss()
     bce_loss_noreduce = torch.nn.BCELoss(reduction="none")
 
-    def __init__(self, model, embed_by_ep:bool=False, negative_rewards:bool=False, seed:int=None):
+    def __init__(self, model, integrator:str="mean", embed_by_ep:bool=False, negative_rewards:bool=False, seed:int=None):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = model.to(self.device)
+        self.integrator = integrator
         self.embed_by_ep = embed_by_ep
         self.negative_rewards = negative_rewards
         self.states, self.actions, self.next_states, self.ep_nums = None, None, None, None
@@ -69,11 +70,21 @@ class RewardLearner:
         # Preference targets
         y_batch = torch.tensor([y for _, _, y in batch], device=self.device)
         # Preference predictions (via Bradley-Terry model)
-        y_pred = torch.cat([self.sigmoid(rewards[i].mean() - rewards[j].mean()).unsqueeze(0) for i, j, _ in batch])
+        y_pred = torch.cat([self.sigmoid(self.integrate_utility(rewards[i]) - self.integrate_utility(rewards[j])
+                                         ).unsqueeze(0) for i, j, _ in batch])
         # Minimise BCE loss
         loss = self.bce_loss(y_pred, y_batch)
         self.model.optimise(loss)
         return loss
+
+    def integrate_utility(self, rewards:torch.Tensor):
+        """Integrate a vector of rewards into a scalar utility value."""
+        if self.integrator == "sum":
+            return rewards.sum()
+        elif self.integrator == "mean":
+            return rewards.mean() if len(rewards) > 0 else 0.  # NOTE: this handles the  "null" zero-reward case
+        else:
+            raise NotImplementedError
 
     def normalise(self):
         """Normalise rewards to have unit standard deviation on the training set, with a common sign (+/-)."""

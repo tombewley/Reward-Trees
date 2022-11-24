@@ -6,7 +6,7 @@ from matplotlib.pyplot import subplots
 
 class RewardTree(RewardLearner):
     """Preference-based reward learner with a tree model."""
-    def __init__(self, features_and_thresholds:dict, max_num_eps:int, max_ep_length:int=None, embed_by_ep:bool=True, seed:int=None):
+    def __init__(self, features_and_thresholds:dict, max_num_eps:int, max_ep_length:int=None, embed_by_ep:bool=True, seed:int=None, **kwargs):
         if seed is not None: torch.manual_seed(seed) # Need to do this here for seeded model initialisation
         # Here self.model learns individual predictions for transitions in the dataset
         # These are used as inputs to the tree growth process
@@ -14,7 +14,7 @@ class RewardTree(RewardLearner):
             model=EmbeddingModel(
                 num_embeddings=max_num_eps*(1 if embed_by_ep else max_ep_length),
                 lr=1e-1),
-            embed_by_ep=embed_by_ep, seed=seed)
+            embed_by_ep=embed_by_ep, seed=seed, **kwargs)
         self.features_and_thresholds = {f: t.to(self.device) for f, t in features_and_thresholds.items()}
         self.reset()
 
