@@ -12,8 +12,9 @@ import matplotlib.pyplot as plt
 
 
 parser = ArgumentParser()
+parser.add_argument("--generator",       type=str, default="sample", choices={"sample", "rollout"})
 parser.add_argument("--num_eps",         type=int, default=500 )
-parser.add_argument("--ep_length",       type=int, default=5   )
+parser.add_argument("--ep_length",       type=int, default=5   )  # NOTE: Need around 50 if generator=rollout
 parser.add_argument("--num_preferences", type=int, default=1500)
 parser.add_argument("--num_leaves",      type=int, default=5   )
 parser.add_argument("--seed",            type=int, default=0   )
@@ -59,23 +60,40 @@ tree = RewardTree(
 # Also initialise a neural network model for comparison
 net = RewardNet(features=(x, x_dot, theta, theta_dot), seed=args.seed)
 
-# Seed the environment and random number generator for pair sampling
-cartpole.observation_space.seed(args.seed)
-cartpole.action_space.seed(args.seed)
-rng = Random(args.seed)
-
-# Generate bunch of 'pseudo-episodes' by randomly sampling from the bounded state space
 n = args.num_eps * args.ep_length
-states  = torch.tensor(array([cartpole.observation_space.sample() for _ in range(n+1)]), device=tree.device)
-actions = torch.tensor(array([cartpole.action_space.sample() for _ in range(n)]), device=tree.device)
-ep_nums = torch.arange(args.num_eps, device=tree.device).repeat_interleave(args.ep_length)
+cartpole.action_space.seed(args.seed)
+if args.generator == "sample":
+    # Generate 'pseudo-episodes' by randomly sampling from the bounded state space
+    cartpole.observation_space.seed(args.seed)
+    states  = torch.tensor(array([cartpole.observation_space.sample() for _ in range(n+1)]), device=tree.device)
+    actions = torch.tensor(array([cartpole.action_space.sample() for _ in range(n)]), device=tree.device)
+    ep_nums = torch.arange(args.num_eps, device=tree.device).repeat_interleave(args.ep_length)
+    next_states = states[1:]
+    states = states[:-1]
+elif args.generator == "rollout":
+    # Generate episodes by rolling out a random policy
+    states, actions, next_states, ep_nums = [], [], [], []
+    ep = -1
+    for t in range(n):
+        if t % args.ep_length == 0:
+            ep += 1
+            s, _ = cartpole.reset(seed=args.seed+ep) # Use episode number to increment seed
+        a = cartpole.action_space.sample()
+        ns, _, _, _, _ = cartpole.step(a)
+        states.append(s); actions.append(a); next_states.append(ns); ep_nums.append(ep)
+        s = ns
+    states = torch.tensor(array(states), device=tree.device)
+    actions = torch.tensor(array(actions), device=tree.device)
+    next_states = torch.tensor(array(next_states), device=tree.device)
+    ep_nums = torch.tensor(array(ep_nums), device=tree.device)
 
-# Add these episode to both models
-tree.add_transitions(states[:-1], actions, states[1:], ep_nums)
-net .add_transitions(states[:-1], actions, states[1:], ep_nums)
+# Add these episodes to both models
+tree.add_transitions(states, actions, next_states, ep_nums)
+net .add_transitions(states, actions, next_states, ep_nums)
 
-# Generate a bunch of preferences over randomly sampled pairs of pseudo-episodes
+# Generate a bunch of preferences over randomly sampled pairs of episodes
 # Preferences are deterministic; the one with higher oracle return is always preferred
+rng = Random(args.seed)
 tried_already = set()
 while len(tree.preferences) < args.num_preferences:
     i = rng.randint(0, args.num_eps-1)
@@ -103,23 +121,25 @@ tree_rewards = tree(s, a, ns).detach().numpy()
 net_rewards  = net (s, a, ns).detach().numpy()
 
 fig, ax = plt.subplots(1, 2)
+plot_features = x, theta
+f0, f1 = (net.model.features.index(f) for f in plot_features)
 if False:
     # Requires https://github.com/tombewley/hyperrectangles
     from hyperrectangles import show_rectangles
-    lo, hi = cartpole.observation_space.low, cartpole.observation_space.high
+    lo, hi = ns.min(dim=0)[0], ns.max(dim=0)[0]
     show_rectangles(tree.to_hyperrectangles(), ax=ax[0],
-        vis_dims=["x", "theta"],
+        vis_dims=(f0, f1),
         # attribute=("mean", "reward"),
-        vis_lims=[[lo[0], hi[0]], [lo[2], hi[2]]],
+        vis_lims=((lo[f0], hi[f0]), (lo[f1], hi[f1])),
         cmap_lims=(tree_rewards.min(), tree_rewards.max()),
         edge_colour="k",
         cbar=False
     )
 
 # Scatter plot reward predictions
-ax[0].scatter(ns[:,0], ns[:,2], c=tree_rewards, s=3, cmap="coolwarm_r")
-ax[1].scatter(ns[:,0], ns[:,2], c=net_rewards,  s=3, cmap="coolwarm_r")
-ax[0].set_xlabel("x"); ax[0].set_ylabel("theta")
+ax[0].scatter(ns[:,f0], ns[:,f1], c=tree_rewards, s=3, cmap="coolwarm_r", zorder=-2)
+ax[1].scatter(ns[:,f0], ns[:,f1], c=net_rewards,  s=3, cmap="coolwarm_r", zorder=-2)
+ax[0].set_xlabel(plot_features[0].__name__); ax[0].set_ylabel(plot_features[1].__name__)
 plt.suptitle("Reward predictions for CartPole")
 ax[0].set_title("Tree"); ax[1].set_title("Net")
 
