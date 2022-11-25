@@ -116,7 +116,7 @@ class RewardTree(RewardLearner):
                         loss_0_1 = ((diff.sign() != y_sign) * w).mean(dim=1)
                         loss_bce = (self.bce_loss_noreduce(self.sigmoid(diff), y.unsqueeze(0).tile((num_thresholds, 1))) * w).mean(dim=1)
                         if loss_func == "0-1": loss_reduction = current_loss_0_1 - loss_0_1
-                        else:                  loss_reduction = current_loss_bce - loss_bceq
+                        else:                  loss_reduction = current_loss_bce - loss_bce
                         best_split = loss_reduction.argmax()
                         if loss_reduction[best_split] > 0: # Only keep split if loss is reduced
                             candidates.append((loss_0_1[best_split], loss_bce[best_split], l, f, best_split))
