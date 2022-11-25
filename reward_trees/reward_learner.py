@@ -80,9 +80,9 @@ class RewardLearner:
     def integrate_utility(self, rewards:torch.Tensor):
         """Integrate a vector of rewards into a scalar utility value."""
         if self.integrator == "sum":
-            return rewards.sum()
+            return rewards.sum(dim=-1)
         elif self.integrator == "mean":
-            return rewards.mean() if len(rewards) > 0 else 0.  # NOTE: this handles the  "null" zero-reward case
+            return rewards.mean(dim=-1) if len(rewards) > 0 else 0.  # NOTE: this handles the  "null" zero-reward case
         else:
             raise NotImplementedError
 

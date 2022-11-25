@@ -66,7 +66,7 @@ class RewardTree(RewardLearner):
             w      = torch.tensor([p.w for p in self.preferences], device=self.device)
             # Initialise a blank tree
             self.reset(ind)
-            self.visits = torch.ones((self.states.shape[0], 1), dtype=bool, device=self.device)
+            idx_to_leaf = self.transitions_to_visits(self.states, self.actions, self.next_states, one_hot=False)
             current_loss_0_1 = 1.
             current_loss_bce = (self.bce_loss_noreduce(0.5 * torch.ones_like(y), y) * w).mean()
             # Growth stage
@@ -75,42 +75,48 @@ class RewardTree(RewardLearner):
                 candidates = []
                 # Iterate through each leaf in the current tree
                 for l, leaf in enumerate(self.leaves):
-                    # Gather visits and mean rewards from all other leaves
-                    visits_other = torch.cat([self.visits[:, :l], torch.zeros((self.states.shape[0], 2), dtype=bool, device=self.device),
-                                              self.visits[:, l+1:]], dim=1).unsqueeze(0)
-                    r_mean_other = torch.cat([self.r_mean[:l], torch.zeros(2, device=self.device), self.r_mean[l+1:]]).unsqueeze(0)
+                    # Predefine incremented idx_to_leaf record and expanded mean reward vector
+                    idx_to_leaf_other = idx_to_leaf.clone(); idx_to_leaf_other[idx_to_leaf > l] += 1
+                    r_mean_other = torch.cat([self.r_mean[:l], torch.empty(2, device=self.device), self.r_mean[l+1:]]).unsqueeze(0)
+                    oh = torch.eye(len(self.leaves) + 1, dtype=int, device=self.device)
                     # Iterate through each splitting feature
                     for f in leaf.features_and_thresholds:
                         num_thresholds = len(leaf.features_and_thresholds[f])
-                        if f not in leaf.left_mask: # Only do this if haven't previously computed and cached
-                            # leaf.left_mask[f] is a (num_thresholds x len(leaf.ind)) binary matrix,
-                            # indicating whether the feature value for each transition is less than each threshold
+                        if f not in leaf.ind_right: # Only do this if haven't previously computed and cached
+                            # right_mask is a (num_thresholds x len(leaf.ind)) binary matrix,
+                            # indicating whether the feature value for each transition is >= each threshold
                             feature_values = f(self.states[leaf.ind], self.actions[leaf.ind], self.next_states[leaf.ind])
-                            leaf.left_mask[f] = (feature_values.unsqueeze(0) < leaf.features_and_thresholds[f].unsqueeze(1)).squeeze()
-                            # Use left mask to compute visits and mean rewards for left and right children, for each threshold
-                            leaf.visits[f] = torch.zeros((num_thresholds, len(self.states), 2), device=self.device)
+                            right_mask = (feature_values.unsqueeze(0) >= leaf.features_and_thresholds[f].unsqueeze(1)).squeeze()
+                            # Use right mask to compute mean rewards for left and right children, for each threshold
                             leaf.r_mean[f] = torch.zeros((num_thresholds, 2), device=self.device)
-                            for t, left_mask in enumerate(leaf.left_mask[f]):
-                                ind_left, ind_right = leaf.ind[left_mask], leaf.ind[~left_mask]
-                                leaf.visits[f][t, ind_left , 0] = 1
-                                leaf.visits[f][t, ind_right, 1] = 1
+                            leaf.ind_right[f] = [None for _ in range(num_thresholds)]
+                            for t, rm in enumerate(right_mask):
+                                ind_left, ind_right = leaf.ind[~rm], leaf.ind[rm]
+                                leaf.ind_right[f][t] = ind_right
                                 if len(ind_left):  leaf.r_mean[f][t, 0] = r[ind_left ].mean()
                                 if len(ind_right): leaf.r_mean[f][t, 1] = r[ind_right].mean()
-                        # Combine visits and mean rewards for children with those for other leaves
-                        visits_all = visits_other.tile((num_thresholds, 1, 1))
+                        # Combine idx -> leaf mapping and mean rewards for children with those for other leaves
+                        idx_to_leaf_all = idx_to_leaf_other.tile((num_thresholds, 1))
                         r_mean_all = r_mean_other.tile((num_thresholds, 1))
-                        visits_all[..., l:l+2] = leaf.visits[f]
+                        for t, ind_right in enumerate(leaf.ind_right[f]):
+                            idx_to_leaf_all[t, ind_right] += 1
                         r_mean_all[..., l:l+2] = leaf.r_mean[f]
                         # Compute mean reward differences for all pairs in the preference dataset
-                        diff = torch.zeros((num_thresholds, len(self.preferences)), device=self.device)
-                        for k, (i, j) in enumerate(i_j):
-                            diff[:, k] = ((visits_all[:, i].sum(dim=1) * r_mean_all).sum(dim=1) / len(i)) - \
-                                         ((visits_all[:, j].sum(dim=1) * r_mean_all).sum(dim=1) / len(j))
+                        r_pred = torch.gather(r_mean_all, 1, idx_to_leaf_all)
+                        diff = torch.stack([self.integrate_utility(r_pred[:, i]) - self.integrate_utility(r_pred[:, j]) for i, j in i_j], dim=1)
+                        # # NOTE: this method for computing `diff` is slower but has better numerical precision
+                        # visits_all = oh[idx_to_leaf_all]
+                        # diff = torch.zeros((num_thresholds, len(self.preferences)), device=self.device)
+                        # for k, (i, j) in enumerate(i_j):
+                        #     diff[:, k] = ((visits_all[:, i].sum(dim=1) * r_mean_all).sum(dim=1) / len(i)) - \
+                        #                  ((visits_all[:, j].sum(dim=1) * r_mean_all).sum(dim=1) / len(j))
+                        # Deal with numerical imprecision, which can add significant noise to `loss_0_1`
+                        diff[diff.abs() < 1e-5] = 0.
                         # Compute losses (0-1 and BCE) and identify the best split using one of these
                         loss_0_1 = ((diff.sign() != y_sign) * w).mean(dim=1)
                         loss_bce = (self.bce_loss_noreduce(self.sigmoid(diff), y.unsqueeze(0).tile((num_thresholds, 1))) * w).mean(dim=1)
                         if loss_func == "0-1": loss_reduction = current_loss_0_1 - loss_0_1
-                        else:                  loss_reduction = current_loss_bce - loss_bce
+                        else:                  loss_reduction = current_loss_bce - loss_bceq
                         best_split = loss_reduction.argmax()
                         if loss_reduction[best_split] > 0: # Only keep split if loss is reduced
                             candidates.append((loss_0_1[best_split], loss_bce[best_split], l, f, best_split))
@@ -124,7 +130,9 @@ class RewardTree(RewardLearner):
                 # Update attributes for use in future growth
                 self.leaves = self.leaves[:l] + [node.left, node.right] + self.leaves[l+1:]
                 self.r_mean = torch.cat([self.r_mean[:l], node.r_mean[f][best_split], self.r_mean[l+1:]])
-                self.visits = torch.cat([self.visits[:, :l], node.visits[f][best_split], self.visits[:, l+1:]], dim=1)
+                idx_to_leaf[idx_to_leaf > l] += 1 # Increment leaf numbers
+                idx_to_leaf[node.right.ind] += 1
+
             #####################
             # TODO: pruning stage
             #####################
@@ -162,11 +170,11 @@ class EmbeddingModel(torch.nn.Embedding):
 class Node:
     """Class for a node in the tree."""
     def __init__(self, ind, features_and_thresholds):
-        # On creation
+        # Populated on creation
         self.ind, self.features_and_thresholds = ind, features_and_thresholds
-        # Pseudo
-        self.left_mask, self.visits, self.r_mean = {}, {}, {}
-        # On self.split()
+        # Populated on split evaluation
+        self.ind_right, self.r_mean = {}, {}
+        # Populated on split acceptance via self.split()
         self.feature, self.threshold = None, None
         self.left, self.right = None, None
 
@@ -176,10 +184,12 @@ class Node:
     def split(self, f, split):
         self.feature = f
         # Create two child nodes
-        left_mask = self.left_mask[f][split]
-        self.left  = Node(self.ind[left_mask ], self.features_and_thresholds.copy())
-        self.right = Node(self.ind[~left_mask], self.features_and_thresholds.copy())
-        # Simultaneously set split threshold for this leaf, and candidate thresholds for children
+        ind_right = self.ind_right[f][split]
+        ind_left = self.ind[~torch.isin(self.ind, ind_right)]
+        assert len(ind_left) + len(ind_right) == len(self.ind)
+        self.left  = Node(ind_left,  self.features_and_thresholds.copy())
+        self.right = Node(ind_right, self.features_and_thresholds.copy())
+        # Simultaneously set split threshold for this node, and candidate thresholds for children
         self.left.features_and_thresholds[f], self.threshold, self.right.features_and_thresholds[f] = \
             torch.split(self.features_and_thresholds[f], [split, 1, len(self.features_and_thresholds[f])-split-1])
         self.threshold = self.threshold.squeeze()
