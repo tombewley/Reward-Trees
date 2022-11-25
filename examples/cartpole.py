@@ -12,7 +12,8 @@ import matplotlib.pyplot as plt
 
 
 parser = ArgumentParser()
-parser.add_argument("--generator",       type=str, default="sample", choices={"sample", "rollout"})
+parser.add_argument("--generator",       type=str, default="sample",     choices={"sample", "rollout"})
+parser.add_argument("--feedback_mode",   type=str, default="preference", choices={"preference", "annotation"})
 parser.add_argument("--num_eps",         type=int, default=500 )
 parser.add_argument("--ep_length",       type=int, default=5   )  # NOTE: Need around 50 if generator=rollout
 parser.add_argument("--num_preferences", type=int, default=1500)
@@ -54,7 +55,8 @@ tree = RewardTree(
         theta     : torch.arange(lo[2], hi[2], 0.005),
         theta_dot : torch.arange(lo[3], hi[3], 0.05 )
     },
-    max_num_eps=args.num_eps, seed=args.seed
+    embed_by_ep=args.feedback_mode == "preference",
+    max_num_eps=args.num_eps, max_ep_length=args.ep_length, seed=args.seed
 )
 
 # Also initialise a neural network model for comparison
@@ -97,22 +99,31 @@ rng = Random(args.seed)
 tried_already = set()
 while len(tree.preferences) < args.num_preferences:
     i = rng.randint(0, args.num_eps-1)
-    j = rng.randint(0, i)
-    if (i, j) not in tried_already:
-        ind_i = tree.get_indices(i)
-        ind_j = tree.get_indices(j)
-        diff = oracle(tree.states[ind_i], tree.actions[ind_i], tree.next_states[ind_i]) \
-             - oracle(tree.states[ind_j], tree.actions[ind_j], tree.next_states[ind_j])
-        # Discard cases of equal return
-        # NOTE: might not always want to do this, but it's necessary if using loss_func="0-1"
-        if diff: 
-            preference = (0. if diff < 0. else 1.)
-            tree.add_preference(i, j, preference)
-            net .add_preference(i, j, preference)
-        tried_already.add((i, j))
+    ind_i = tree.get_indices(i)
+    if args.feedback_mode == "preference":
+        # Pairwise preferences over two episodes
+        j = rng.randint(0, i)
+        if (i, j) not in tried_already:
+            ind_j = tree.get_indices(j)
+            diff = oracle(tree.states[ind_i], tree.actions[ind_i], tree.next_states[ind_i]) \
+                 - oracle(tree.states[ind_j], tree.actions[ind_j], tree.next_states[ind_j])
+            # Discard cases of equal return
+            # NOTE: might not always want to do this, but it's necessary if using loss_func="0-1"
+            if diff:
+                preference = (0. if diff < 0. else 1.)
+                tree.add_preference(i, j, preference)
+                net .add_preference(i, j, preference)
+            tried_already.add((i, j))
+    elif args.feedback_mode == "annotation":
+        # Positive/negative annotation of a single episode
+        if i not in tried_already:
+            annotation = not_terminated(tree.states[ind_i], tree.actions[ind_i], tree.next_states[ind_i]).int()
+            tree.add_annotation(i, annotation)
+            net .add_annotation(i, annotation)
+            tried_already.add(i)
 
 # Train both models on the preference dataset
-tree.train(max_num_leaves=args.num_leaves, loss_func="0-1")
+tree.train(max_num_leaves=args.num_leaves, num_batches=2000, loss_func="bce")
 net .train(num_batches=2000)
 
 # Predict rewards for all transitions in the dataset
