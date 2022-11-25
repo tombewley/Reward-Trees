@@ -82,7 +82,8 @@ class RewardLearner:
         if self.integrator == "sum":
             return rewards.sum(dim=-1)
         elif self.integrator == "mean":
-            return rewards.mean(dim=-1) if len(rewards) > 0 else 0.  # NOTE: this handles the  "null" zero-reward case
+            # NOTE: this handles the  "null" zero-reward case
+            return rewards.mean(dim=-1) if rewards.shape[-1] > 0 else torch.zeros(rewards.shape[:-1], device=self.device)
         else:
             raise NotImplementedError
 
