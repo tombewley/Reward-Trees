@@ -113,3 +113,30 @@ class RewardLearner:
         else: rewards = self.model(self.states[i], self.actions[i], self.next_states[i])
         if torch.isnan(rewards).any(): raise Exception
         return rewards
+
+    """Methods for grounding non-standard feedback into the canonical pairwise preference representation."""
+
+    def add_annotation(self, ep_num:int, annotation:torch.Tensor, blank_weight:float=1.):
+        """Add positive/negative annotations to an episode and parse into a set of inter-temporal preferences,
+        as in "Improving Multimodal Interactive Agents with Reinforcement Learning from Human Feedback".
+        For a length-T episode, the maximum number of preferences produced is T(T-1)/2.
+        """
+        ind = self.get_indices(ep_num)
+        assert ind.shape == annotation.shape, "Annotation shape mismatch"
+        for t2 in range(len(ind)+1):
+            for t1 in range(t2):
+                unique = annotation[t1:t2].unique()
+                unique = unique[unique != 0]
+                if len(unique) <= 1:
+                    # A preference is added if all annotations in the time window have the same sign,
+                    # or if there are no annotations at all
+                    sign = unique.item() if len(unique) == 1 else 0
+                    self.add_preference(
+                        i=ind[t1:t2],
+                        # In the fully-observable case, the original method is equivalent to taking preferences
+                        # between time windows and a "null" zero-reward episode
+                        j=torch.tensor([], dtype=int),
+                        # NOTE: the interptetation of the blank case as an equal preference differs from the original
+                        preference=(sign + 1.) / 2.,
+                        weight=blank_weight if sign == 0 else 1.
+                    )
