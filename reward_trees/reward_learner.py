@@ -49,7 +49,7 @@ class RewardLearner:
             self.ep_nums     = torch.cat((self.ep_nums, ep_nums))
 
     def add_preference(self, i:Union[torch.Tensor, int, callable], j:Union[torch.Tensor, int, callable], preference:float, weight:float=1., **info):
-        """Add a preference to the dataset.
+        """Add a preference to the dataset (1 means i preferred, 0 means j preferred).
         i and j are either tensors specifying indices in the dataset, integers specifying ep_nums, or binary selection functions.
         """
         assert (type(i) in {torch.Tensor, int} or callable(i)) and (type(j) in {torch.Tensor, int} or callable(j)), f"Invalid type for i or j"
@@ -60,6 +60,7 @@ class RewardLearner:
     def update_on_batch(self, batch_size:int):
         """Sample a random batch of preferences and update the model using torch.nn.BCELoss."""
         k = len(self.preferences)
+        if k == 0: print("No preference data!"); return
         # Sample a preference batch with replacement according to weights
         batch = [(self.get_indices(p.i), self.get_indices(p.j), p.y) for p in
                   self.rng.choices(self.preferences, weights=[p.w for p in self.preferences], k=min(batch_size, k))]
