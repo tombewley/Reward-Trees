@@ -100,8 +100,8 @@ class RewardLearner:
         If i is an integer, interpret it as an ep_num and look up indices in the dataset.
         If i is a function, run that function to get indices.
         """
-        if type(i) == int: return torch.nonzero(self.ep_nums == i).squeeze()
-        elif callable(i):  return torch.nonzero(i(self.states, self.actions, self.next_states)).squeeze()
+        if type(i) == int: return torch.nonzero(self.ep_nums == i).squeeze(1)
+        elif callable(i):  return torch.nonzero(i(self.states, self.actions, self.next_states)).squeeze(1)
         else: return i
 
     def indices_to_rewards(self, i:torch.Tensor=None) -> torch.Tensor:

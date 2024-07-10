@@ -1,6 +1,6 @@
 from . import RewardLearner
 import torch
-from numpy import array, unravel_index
+from numpy import unravel_index
 from matplotlib.pyplot import subplots
 
 
@@ -13,7 +13,7 @@ class RewardTree(RewardLearner):
         RewardLearner.__init__(self,
             model=EmbeddingModel(
                 num_embeddings=max_num_eps*(1 if embed_by_ep else max_ep_length),
-                lr=1e-1),
+                lr=1e-2),
             embed_by_ep=embed_by_ep, seed=seed, **kwargs)
         self.features_and_thresholds = {f: t.to(self.device) for f, t in features_and_thresholds.items()}
         self.reset()
@@ -86,7 +86,7 @@ class RewardTree(RewardLearner):
                             # right_mask is a (num_thresholds x len(leaf.ind)) binary matrix,
                             # indicating whether the feature value for each transition is >= each threshold
                             feature_values = f(self.states[leaf.ind], self.actions[leaf.ind], self.next_states[leaf.ind])
-                            right_mask = (feature_values.unsqueeze(0) >= leaf.features_and_thresholds[f].unsqueeze(1)).squeeze()
+                            right_mask = (feature_values.unsqueeze(0) >= leaf.features_and_thresholds[f].unsqueeze(1))
                             # Use right mask to compute mean rewards for left and right children, for each threshold
                             leaf.r_mean[f] = torch.zeros((num_thresholds, 2), device=self.device)
                             leaf.ind_right[f] = [None for _ in range(num_thresholds)]
@@ -117,10 +117,11 @@ class RewardTree(RewardLearner):
                         loss_bce = (self.bce_loss_noreduce(self.sigmoid(diff), y.unsqueeze(0).tile((num_thresholds, 1))) * w).mean(dim=1)
                         if loss_func == "0-1": loss_reduction = current_loss_0_1 - loss_0_1
                         else:                  loss_reduction = current_loss_bce - loss_bce
-                        best_split = loss_reduction.argmax()
-                        if loss_reduction[best_split] > 0: # Only keep split if loss is reduced
-                            candidates.append((loss_0_1[best_split], loss_bce[best_split], l, f, best_split))
-                        if plot: ax[l].plot(leaf.features_and_thresholds[f], loss_reduction)
+                        if len(loss_reduction) > 0:
+                            best_split = loss_reduction.argmax()
+                            if loss_reduction[best_split] > 0: # Only keep split if loss is reduced
+                                candidates.append((loss_0_1[best_split], loss_bce[best_split], l, f, best_split))
+                        if plot: ax[l].plot(leaf.features_and_thresholds[f], loss_reduction, marker="o")
                 if len(candidates) == 0: break # If loss reduction not possible, stop growth
                 # Identify and make the best split across all leaves and features
                 current_loss_0_1, current_loss_bce, l, f, best_split = sorted(candidates, key=lambda c: c[0 if loss_func == "0-1" else 1])[0]
