@@ -24,7 +24,7 @@ class NetModel(torch.nn.Module):
         super(NetModel, self).__init__()
         self.features = features
         layer_sizes = [len(self.features)] + hidden_layers + [1]
-        layers = []
+        layers = [torch.nn.LayerNorm(len(self.features))]
         for l in range(len(layer_sizes) - 1):
             layers.append(torch.nn.Linear(layer_sizes[l], layer_sizes[l+1]))
             if l < len(layer_sizes) - 2: layers.append(activation)
