@@ -13,7 +13,7 @@ class RewardLearner:
     bce_loss_noreduce = torch.nn.BCELoss(reduction="none")
 
     def __init__(self, model, integrator:str="mean", embed_by_ep:bool=False, negative_rewards:bool=False, seed:int=None):
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.model = model.to(self.device)
         self.integrator = integrator
         self.embed_by_ep = embed_by_ep
