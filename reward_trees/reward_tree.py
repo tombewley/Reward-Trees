@@ -50,7 +50,7 @@ class RewardTree(RewardLearner):
         self.leaves = [self.root]
         self.r_mean = torch.zeros(1, device=self.device)
 
-    def train(self, max_num_leaves:int=2, loss_func:str="0-1", num_batches:int=500, batch_size:int=32, plot:bool=False):
+    def train(self, max_num_leaves:int=2, loss_func:str="0-1", num_batches:int=500, batch_size:int=32, callbacks=None, plot:bool=False):
         """Complete model induction process from paper "Reward Learning with Trees: Methods and Evaluation"."""
         assert loss_func in {"0-1", "bce"}
         # Estimate rewards for transitions in the dataset by gradient descent on BCE loss
@@ -133,6 +133,10 @@ class RewardTree(RewardLearner):
                 self.r_mean = torch.cat([self.r_mean[:l], node.r_mean[f][best_split], self.r_mean[l+1:]])
                 idx_to_leaf[idx_to_leaf > l] += 1 # Increment leaf numbers
                 idx_to_leaf[node.right.ind] += 1
+                # Run callbacks
+                if callbacks is not None:
+                    for callback in callbacks:
+                        callback(self)
 
             #####################
             # TODO: pruning stage
