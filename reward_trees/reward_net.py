@@ -19,7 +19,7 @@ class NetModel(torch.nn.Module):
                  hidden_layers=[256, 256, 256],
                  activation=torch.nn.LeakyReLU(),
                  optimiser=torch.optim.Adam,
-                 lr=3e-4
+                 lr=3e-4,
                  ):
         super(NetModel, self).__init__()
         self.features = features

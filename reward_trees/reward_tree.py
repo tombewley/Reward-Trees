@@ -13,7 +13,7 @@ class RewardTree(RewardLearner):
         RewardLearner.__init__(self,
             model=EmbeddingModel(
                 num_embeddings=max_num_eps*(1 if embed_by_ep else max_ep_length),
-                lr=1e-2),
+                lr=3e-4),
             embed_by_ep=embed_by_ep, seed=seed, **kwargs)
         self.features_and_thresholds = {f: t.to(self.device) for f, t in features_and_thresholds.items()}
         self.reset()
